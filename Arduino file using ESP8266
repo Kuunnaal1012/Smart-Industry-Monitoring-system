@@ -1,0 +1,79 @@
+#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include <DHT.h>
+
+// WiFi credentials
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+
+// Firebase REST endpoint and secret
+const char* firebase_host = "";
+const char* firebase_secret = "";
+
+// DHT Sensor setup
+#define DHTPIN D4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// Vibration sensor
+#define VIBRATION_PIN D8
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  dht.begin();
+  pinMode(VIBRATION_PIN, INPUT);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print(F("Connecting to WiFi"));
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(F("."));
+  }
+  Serial.println(F("\nWiFi connected!"));
+}
+
+void loop() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  bool vibration = digitalRead(VIBRATION_PIN);
+
+  sendToFirebase(temperature, humidity, vibration);
+
+  delay(5000);
+}
+
+void sendToFirebase(float temp, float hum, bool vibration) {
+  WiFiClientSecure client;
+  client.setInsecure();  // Accept all certificates (for testing only)
+
+  if (!client.connect(firebase_host, 443)) {
+    Serial.println(F("❌ Connection to Firebase failed"));
+    return;
+  }
+
+  String path = "/SensorData/sensor1.json?auth=" + String(firebase_secret);
+  String payload = "{\"Temperature(C)\":";
+  payload += temp;
+  payload += ",\"Humidity(%)\":";
+  payload += hum;
+  payload += ",\"Vibrations\":\"";
+  payload += vibration ? "true" : "false";
+  payload += "\",\"Date\":\"2025-05-02\",\"Time\":\"12:34:56\"}";
+
+  client.print(String("PUT ") + path + " HTTP/1.1\r\n" +
+               "Host: " + firebase_host + "\r\n" +
+               "Content-Type: application/json\r\n" +
+               "Content-Length: " + payload.length() + "\r\n\r\n" +
+               payload);
+
+  // Wait briefly to get a response (optional)
+  delay(200);
+  while (client.available()) {
+    String line = client.readStringUntil('\n');
+    Serial.println(line);
+  }
+
+  client.stop();
+}
